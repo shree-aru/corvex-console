@@ -1,0 +1,14 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	conn
+#open	2026-08-16-15-30-00
+#fields	ts	uid	id.orig_h	id.orig_p	id.resp_h	id.resp_p	proto	service	duration	orig_bytes	resp_bytes	conn_state	missed_bytes	orig_pkts	resp_pkts
+#types	time	string	addr	port	addr	port	enum	string	interval	count	count	string	count	count	count
+1723824256.123456	Cjk2jl2abc	192.168.10.77	52341	192.168.10.30	502	tcp	modbus	12.340000	1120	980	SF	0	14	14
+1723824258.234567	Cjk2jl3def	192.168.10.77	52342	192.168.10.31	502	tcp	modbus	8.120000	640	560	SF	0	8	8
+1723824260.345678	Cjk2jl4ghi	192.168.10.20	49200	192.168.10.30	502	tcp	modbus	300.000000	24000	21000	SF	0	120	120
+1723824262.456789	Cjk2jl5jkl	10.44.2.19	49152	192.168.10.20	3389	tcp	rdp	45.670000	8900	15200	SF	0	42	58
+1723824264.567890	Cjk2jl6mno	192.168.10.77	52343	192.168.10.30	502	tcp	modbus	0.450000	280	210	SF	0	4	4
+1723824266.678901	Cjk2jl7pqr	192.168.10.77	52344	192.168.10.31	502	tcp	modbus	1.230000	420	350	SF	0	6	6
