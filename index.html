@@ -975,58 +975,129 @@ renderEvidence = function(){
       }
     });
   }
-  // Report button — real incident report download
+  // Report button — formatted HTML incident report download
   const exp = document.getElementById("exp");
   if(exp){
     exp.onclick = null;
     exp.addEventListener("click", () => {
       const a = ALERTS.find(x => x.id === selected);
       if(!a) return;
-      const report = [
-        `CORVEX INCIDENT REPORT`,
-        `${'='.repeat(50)}`,
-        `Generated: ${new Date().toISOString()}`,
-        ``,
-        `ALERT: ${a.id}`,
-        `Type: ${a.type}`,
-        `Severity: ${a.sev.toUpperCase()}`,
-        `Rule: ${a.rule}`,
-        `Asset: ${a.asset}`,
-        `Raised: ${a.t}`,
-        `State: ${a.state}`,
-        `Detector: ${a.detector}`,
-        ``,
-        `FACTS`,
-        `${'-'.repeat(30)}`,
-        ...a.facts.map(([k,v]) => `${k}: ${v}`),
-        ``,
-        `ANALYSIS`,
-        `${'-'.repeat(30)}`,
-        a.reason,
-        ``,
-        `CORRELATION TRAIL`,
-        `${'-'.repeat(30)}`,
-        ...a.ladder.map(l => `[${l.t}] ${l.h}\n  ${l.p}\n  Source: ${l.s}`),
-        ``,
-        `VAULT RECORD`,
-        `${'-'.repeat(30)}`,
-        `Digest: ${a.hash}`,
-        `Previous: ${a.prev}`,
-        ``,
-        `CAVEAT`,
-        `${'-'.repeat(30)}`,
-        a.caveat,
-        ``,
-        `RAW EVENT`,
-        `${'-'.repeat(30)}`,
-        a.raw
-      ].join('\n');
-      const blob = new Blob([report], {type:'text/plain'});
+      const ts = new Date().toISOString();
+      const sevColor = a.sev === 'critical' ? '#1a1a2e' : a.sev === 'high' ? '#2d2d3f' : a.sev === 'medium' ? '#555' : '#888';
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CORVEX Report — ${a.id}</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Archivo",system-ui,sans-serif;color:#1a1a2e;background:#f8f8fa;line-height:1.6;padding:48px 32px 96px}
+.page{max-width:800px;margin:0 auto}
+.mono{font-family:"IBM Plex Mono",monospace}
+.header{border-bottom:2px solid #1a1a2e;padding-bottom:24px;margin-bottom:32px}
+.header .brand{font-size:.625rem;letter-spacing:.16em;text-transform:uppercase;color:#666;font-family:"IBM Plex Mono",monospace}
+.header h1{font-size:1.75rem;font-weight:700;letter-spacing:-.02em;margin-top:8px}
+.header .meta{font-family:"IBM Plex Mono",monospace;font-size:.75rem;color:#666;margin-top:8px}
+.sev-badge{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.625rem;letter-spacing:.12em;text-transform:uppercase;padding:3px 10px;border:1px solid ${sevColor};color:${a.sev==='critical'?'#f8f8fa':sevColor};background:${a.sev==='critical'?sevColor:'transparent'};margin-right:8px}
+.section{margin-top:32px}
+.section-title{font-size:.6875rem;letter-spacing:.11em;text-transform:uppercase;color:#666;font-family:"IBM Plex Mono",monospace;padding-bottom:8px;border-bottom:1px solid #1a1a2e;margin-bottom:16px}
+.facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px 24px}
+.fact dt{font-family:"IBM Plex Mono",monospace;font-size:.625rem;letter-spacing:.1em;text-transform:uppercase;color:#666}
+.fact dd{font-family:"IBM Plex Mono",monospace;font-size:.8125rem;margin-top:2px}
+.analysis{font-size:1.0625rem;line-height:1.65;max-width:66ch}
+.trail{list-style:none;padding:0}
+.trail li{display:grid;grid-template-columns:90px 12px 1fr;gap:12px;padding-bottom:20px;position:relative}
+.trail li:last-child{padding-bottom:0}
+.trail time{font-family:"IBM Plex Mono",monospace;font-size:.6875rem;color:#666;padding-top:3px}
+.trail .dot{width:9px;height:9px;border:1px solid #1a1a2e;margin-top:5px;background:#f8f8fa}
+.trail li.verdict .dot{background:#1a1a2e}
+.trail .dot-col{position:relative;display:flex;justify-content:center}
+.trail .dot-col::after{content:"";position:absolute;top:16px;bottom:-20px;width:1px;background:#ccc}
+.trail li:last-child .dot-col::after{display:none}
+.trail h4{font-size:.9375rem;font-weight:600;margin:0}
+.trail p{font-size:.875rem;color:#444;margin-top:2px;max-width:56ch}
+.trail .src{font-family:"IBM Plex Mono",monospace;font-size:.6875rem;color:#888;margin-top:4px;display:block}
+.vault-box{border:1px solid #1a1a2e;padding:20px;margin-top:16px}
+.vault-box dl{display:grid;grid-template-columns:auto 1fr;gap:6px 20px;margin-top:12px}
+.vault-box dt{font-family:"IBM Plex Mono",monospace;font-size:.625rem;letter-spacing:.1em;text-transform:uppercase;color:#666}
+.vault-box dd{font-family:"IBM Plex Mono",monospace;font-size:.75rem;word-break:break-all}
+pre{background:#eee;border:1px solid #ddd;padding:16px;font-family:"IBM Plex Mono",monospace;font-size:.75rem;line-height:1.65;overflow-x:auto;margin-top:12px}
+.caveat{font-size:.8125rem;color:#666;max-width:60ch;margin-top:16px;padding-top:12px;border-top:1px dotted #ccc}
+.footer{margin-top:48px;padding-top:16px;border-top:1px solid #1a1a2e;font-family:"IBM Plex Mono",monospace;font-size:.625rem;color:#888;letter-spacing:.08em;text-transform:uppercase}
+@media print{body{padding:24px;background:#fff}pre{white-space:pre-wrap}}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div class="brand">CORVEX Labs · Incident Report · v0.1</div>
+    <h1>${esc(a.type)} on ${esc(a.asset)}</h1>
+    <div class="meta">
+      <span class="sev-badge">${a.sev} · ${a.rule}</span>
+      Generated ${ts.replace('T',' ').slice(0,19)} UTC
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Facts</div>
+    <div class="facts">
+      <div class="fact"><dt>Alert</dt><dd>${a.id}</dd></div>
+      <div class="fact"><dt>Raised</dt><dd>${a.t}</dd></div>
+      ${a.facts.map(([k,v]) => `<div class="fact"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}
+      <div class="fact"><dt>Detector</dt><dd>${esc(a.detector)}</dd></div>
+      <div class="fact"><dt>State</dt><dd>${a.state}</dd></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Analysis</div>
+    <p class="analysis">${esc(a.reason)}</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Correlation trail · ${a.ladder.length} links</div>
+    <ol class="trail">
+      ${a.ladder.map(l => `<li class="${l.v?'verdict':''}">
+        <time>${l.t}</time>
+        <span class="dot-col"><span class="dot"></span></span>
+        <div><h4>${esc(l.h)}</h4><p>${esc(l.p)}</p><span class="src">${esc(l.s)}</span></div>
+      </li>`).join('')}
+    </ol>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Vault record</div>
+    <div class="vault-box">
+      <span class="mono" style="font-size:.625rem;letter-spacing:.1em;text-transform:uppercase;color:#666">Tamper-evident hash chain</span>
+      <dl>
+        <dt>Digest</dt><dd>${a.hash}</dd>
+        <dt>Previous</dt><dd>${a.prev}</dd>
+        <dt>Detector</dt><dd>${esc(a.detector)}</dd>
+        <dt>Disposition</dt><dd>${a.state === 'open' ? 'pending operator review' : (a.facts.find(f=>f[0]==='Disposition')?.[1]||'benign') + ' · signed'}</dd>
+      </dl>
+    </div>
+    <p class="caveat">${esc(a.caveat)}</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Normalized event</div>
+    <pre>${esc(a.raw)}</pre>
+  </div>
+
+  <div class="footer">
+    CORVEX Labs · Evidence Console v0.1 · Passive OT Monitoring · Report sealed ${ts.slice(0,10)}
+  </div>
+</div>
+</body>
+</html>`;
+      const blob = new Blob([html], {type:'text/html'});
       const url = URL.createObjectURL(blob);
       const dl = document.createElement('a');
-      dl.href = url; dl.download = `corvex-report-${a.id}.txt`; dl.click();
+      dl.href = url; dl.download = `corvex-report-${a.id}.html`; dl.click();
       URL.revokeObjectURL(url);
-      exp.textContent = 'Sealed ✓'; exp.disabled = true;
+      exp.textContent = 'Sealed \u2713'; exp.disabled = true;
     });
   }
 };
