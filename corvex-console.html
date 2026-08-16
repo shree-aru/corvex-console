@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CORVEX / Evidence Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* monochrome ink-on-paper scale, tinted toward a cold slate hue */
+    --paper:      oklch(97.6% 0.004 265);
+    --paper-sunk: oklch(95.2% 0.005 265);
+    --paper-edge: oklch(92.4% 0.005 265);
+    --ink:        oklch(17.5% 0.013 265);
+    --ink-2:      oklch(30%   0.011 265);
+    --ink-3:      oklch(47%   0.009 265);
+    --ink-4:      oklch(66%   0.007 265);
+    --line:       oklch(85%   0.006 265);
+    --line-soft:  oklch(90.5% 0.005 265);
+    --ring:       oklch(17.5% 0.013 265);
+
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px; --s9:96px;
+
+    --sans:"Archivo",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+
+    --e-out:cubic-bezier(0.16,1,0.3,1);
+    --e-quart:cubic-bezier(0.25,1,0.5,1);
+  }
+
+  *,*::before,*::after{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:1rem; line-height:1.5;
+    font-optical-sizing:auto;
+    -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;
+  }
+  h1,h2,h3{text-wrap:balance;margin:0}
+  p{margin:0}
+  button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}
+  :focus-visible{outline:2px solid var(--ring);outline-offset:3px;border-radius:1px}
+
+  /* ---------- shared atoms ---------- */
+  .eyebrow{
+    font-family:var(--mono); font-size:.6875rem; font-weight:500;
+    letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3);
+  }
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .rule{height:1px;background:var(--line);border:0;margin:0}
+
+  /* ---------- shell ---------- */
+  .shell{display:grid;grid-template-columns:236px minmax(0,1fr);min-height:100vh}
+
+  /* ---------- rail ---------- */
+  .rail{
+    border-right:1px solid var(--line);
+    padding:var(--s5) 0 var(--s5) var(--s5);
+    display:flex;flex-direction:column;gap:var(--s7);
+    position:sticky;top:0;height:100vh;
+  }
+  .mark{display:flex;flex-direction:column;gap:2px;padding-right:var(--s5)}
+  .mark b{font-size:1.0625rem;font-weight:700;letter-spacing:.14em}
+  .mark span{font-family:var(--mono);font-size:.625rem;letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase}
+
+  .nav{display:flex;flex-direction:column}
+  .nav a{
+    display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:var(--s3);
+    text-decoration:none;color:var(--ink-2);
+    padding:9px var(--s4) 9px 0;
+    font-size:.9375rem;font-weight:500;
+    border-bottom:1px solid var(--line-soft);
+    transition:color .12s linear,padding-left .28s var(--e-quart);
+  }
+  .nav a i{font-family:var(--mono);font-size:.625rem;color:var(--ink-4);font-style:normal}
+  .nav a:hover{color:var(--ink);padding-left:6px}
+  .nav a[aria-current="page"]{color:var(--ink);font-weight:600}
+  .nav a[aria-current="page"] i{color:var(--ink)}
+  .nav a .tally{font-family:var(--mono);font-size:.75rem;color:var(--ink-3)}
+
+  .rail-foot{margin-top:auto;padding-right:var(--s5);display:flex;flex-direction:column;gap:var(--s3)}
+  .chip-offline{
+    display:inline-flex;align-items:center;gap:var(--s2);align-self:flex-start;
+    border:1px solid var(--ink);padding:3px 8px;
+    font-family:var(--mono);font-size:.625rem;letter-spacing:.1em;text-transform:uppercase;
+  }
+  .rail-foot small{font-family:var(--mono);font-size:.625rem;color:var(--ink-4);line-height:1.7}
+
+  /* ---------- topbar ---------- */
+  .topbar{
+    display:flex;align-items:center;gap:var(--s5);flex-wrap:wrap;
+    padding:var(--s4) var(--s6);
+    border-bottom:1px solid var(--line);
+    position:sticky;top:0;background:var(--paper);z-index:20;
+  }
+  .seg{display:flex;align-items:baseline;gap:var(--s2)}
+  .seg strong{font-weight:600;font-size:.9375rem}
+  .live{display:flex;align-items:center;gap:var(--s2);font-family:var(--mono);font-size:.75rem;color:var(--ink-2)}
+  .pulse{width:7px;height:7px;background:var(--ink);border-radius:50%;animation:pulse 2s var(--e-out) infinite}
+  @keyframes pulse{0%{opacity:1;transform:scale(1)}60%{opacity:.25;transform:scale(.6)}100%{opacity:1;transform:scale(1)}}
+  .topbar .spacer{margin-left:auto}
+  .meter{display:flex;align-items:baseline;gap:6px;font-family:var(--mono);font-size:.75rem;color:var(--ink-3)}
+  .meter b{color:var(--ink);font-weight:500}
+  .btn{
+    border:1px solid var(--ink);padding:7px 14px;
+    font-family:var(--mono);font-size:.6875rem;letter-spacing:.1em;text-transform:uppercase;
+    transition:background .14s linear,color .14s linear;
+  }
+  .btn:hover{background:var(--ink);color:var(--paper)}
+  .btn.solid{background:var(--ink);color:var(--paper)}
+  .btn.solid:hover{background:var(--ink-2)}
+  .btn.quiet{border-color:var(--line)}
+  .btn.quiet:hover{border-color:var(--ink)}
+  .btn:disabled{border-color:var(--line);color:var(--ink-4);cursor:not-allowed;background:none}
+
+  /* ---------- masthead ---------- */
+  .masthead{padding:var(--s7) var(--s6) var(--s5)}
+  .masthead h1{
+    font-size:clamp(2rem,4.2vw,3.25rem);font-weight:700;letter-spacing:-.025em;line-height:1.02;
+    max-width:22ch;margin-top:var(--s3);
+  }
+  .masthead .lede{margin-top:var(--s4);max-width:68ch;color:var(--ink-2);text-wrap:pretty}
+  .strip{
+    display:flex;flex-wrap:wrap;margin-top:var(--s6);
+    border-top:1px solid var(--ink);border-bottom:1px solid var(--line);
+  }
+  .strip div{padding:var(--s3) var(--s5) var(--s3) 0;margin-right:var(--s5);border-right:1px solid var(--line-soft)}
+  .strip div:last-child{border-right:0;margin-right:0}
+  .strip b{display:block;font-family:var(--mono);font-size:1.375rem;font-weight:500;letter-spacing:-.01em}
+  .strip span{font-family:var(--mono);font-size:.625rem;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3)}
+
+  /* ---------- workbench ---------- */
+  .workbench{display:grid;grid-template-columns:minmax(320px,400px) minmax(0,1fr);border-bottom:1px solid var(--line)}
+  .queue{border-right:1px solid var(--line)}
+  .queue-head{display:flex;align-items:center;gap:var(--s3);padding:var(--s4) var(--s5) var(--s3) var(--s6);flex-wrap:wrap}
+  .filters{display:flex;gap:var(--s1);margin-left:auto}
+  .filters button{
+    font-family:var(--mono);font-size:.6875rem;letter-spacing:.06em;text-transform:uppercase;
+    padding:4px 9px;border:1px solid transparent;color:var(--ink-3);
+    transition:color .12s linear,border-color .12s linear;
+  }
+  .filters button:hover{color:var(--ink)}
+  .filters button[aria-pressed="true"]{color:var(--ink);border-color:var(--line);background:var(--paper-sunk)}
+
+  .group-label{padding:var(--s5) var(--s5) var(--s2) var(--s6);border-top:1px solid var(--line-soft)}
+  ol.alerts{list-style:none;margin:0;padding:0}
+  ol.alerts li{border-top:1px solid var(--line-soft)}
+  ol.alerts li:first-child{border-top:1px solid var(--line-soft)}
+  .row{
+    width:100%;text-align:left;display:grid;grid-template-columns:14px 1fr auto;gap:var(--s3);
+    padding:var(--s4) var(--s5) var(--s4) var(--s6);
+    transition:background .16s linear,color .16s linear;
+  }
+  .row:hover{background:var(--paper-sunk)}
+  .row .type{font-weight:600;font-size:.9375rem;letter-spacing:-.005em;display:block}
+  .row .meta{font-family:var(--mono);font-size:.75rem;color:var(--ink-3);display:block;margin-top:3px}
+  .row .clock{font-family:var(--mono);font-size:.6875rem;color:var(--ink-4);white-space:nowrap;padding-top:2px}
+  .row .sev{margin-top:6px;width:10px;height:10px;color:var(--ink)}
+  .sev[data-sev="critical"]{background:var(--ink)}
+  .sev[data-sev="high"]{background-image:radial-gradient(currentColor .8px,transparent .9px);background-size:3px 3px;border:1px solid var(--ink)}
+  .sev[data-sev="medium"]{border:1px solid var(--ink)}
+  .sev[data-sev="low"]{border:1px solid var(--ink-4)}
+  li[aria-selected="true"] .row{background:var(--ink);color:var(--paper)}
+  li[aria-selected="true"] .row .meta,li[aria-selected="true"] .row .clock{color:oklch(78% .006 265)}
+  li[aria-selected="true"] .sev{color:var(--paper)}
+  li[aria-selected="true"] .sev[data-sev="critical"]{background:var(--paper)}
+  li[aria-selected="true"] .sev[data-sev="high"],li[aria-selected="true"] .sev[data-sev="medium"]{border-color:var(--paper)}
+  li.cleared .row .type{font-weight:500;color:var(--ink-3);text-decoration:line-through;text-decoration-thickness:1px}
+  li.cleared[aria-selected="true"] .row .type{color:var(--paper)}
+
+  .empty{padding:var(--s8) var(--s6);border-top:1px solid var(--line-soft)}
+  .empty h3{font-size:1.375rem;font-weight:600;letter-spacing:-.01em}
+  .empty p{color:var(--ink-3);max-width:44ch;margin-top:var(--s2);font-size:.9375rem}
+
+  /* ---------- evidence ---------- */
+  .evidence{padding:var(--s5) var(--s6) var(--s8)}
+  .ev-head{display:flex;align-items:flex-start;gap:var(--s5);flex-wrap:wrap}
+  .ev-head h2{font-size:1.75rem;font-weight:700;letter-spacing:-.022em;line-height:1.1;margin-top:var(--s2)}
+  .sev-tag{
+    display:inline-flex;align-items:center;gap:var(--s2);
+    font-family:var(--mono);font-size:.625rem;letter-spacing:.12em;text-transform:uppercase;
+    border:1px solid var(--ink);padding:3px 8px;
+  }
+  .sev-tag[data-sev="critical"]{background:var(--ink);color:var(--paper)}
+  .sev-tag[data-sev="low"]{border-color:var(--ink-4);color:var(--ink-3)}
+  .ev-actions{margin-left:auto;display:flex;gap:var(--s2);padding-top:var(--s2)}
+
+  .facts{display:flex;flex-wrap:wrap;gap:0;margin-top:var(--s5);border-top:1px solid var(--line)}
+  .facts div{padding:var(--s3) var(--s6) var(--s3) 0}
+  .facts dt{font-family:var(--mono);font-size:.625rem;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3)}
+  .facts dd{margin:3px 0 0;font-family:var(--mono);font-size:.8125rem}
+
+  .reason{margin-top:var(--s5);font-size:1.0625rem;line-height:1.55;max-width:66ch;text-wrap:pretty}
+
+  .panels{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:var(--s7);margin-top:var(--s7)}
+  .panel-title{display:flex;align-items:baseline;gap:var(--s3);padding-bottom:var(--s3);border-bottom:1px solid var(--ink)}
+  .panel-title h3{font-size:1rem;font-weight:600;letter-spacing:-.005em}
+  .panel-title span{font-family:var(--mono);font-size:.625rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-left:auto}
+
+  .plot{margin-top:var(--s4)}
+  .plot svg{display:block;width:100%;height:auto;overflow:visible}
+  .legend{display:flex;gap:var(--s5);margin-top:var(--s3);font-family:var(--mono);font-size:.6875rem;color:var(--ink-2)}
+  .legend i{display:inline-block;width:22px;height:0;border-top:1.5px solid var(--ink);vertical-align:middle;margin-right:7px}
+  .legend .dashed i{border-top-style:dashed;border-color:var(--ink-3)}
+
+  ol.ladder{list-style:none;margin:var(--s4) 0 0;padding:0}
+  ol.ladder li{display:grid;grid-template-columns:78px 13px 1fr;gap:var(--s3);padding-bottom:var(--s5)}
+  ol.ladder li:last-child{padding-bottom:0}
+  ol.ladder time{font-family:var(--mono);font-size:.6875rem;color:var(--ink-3);padding-top:2px}
+  .node{position:relative;display:flex;justify-content:center}
+  .node::before{content:"";width:9px;height:9px;border:1px solid var(--ink);margin-top:5px;background:var(--paper);z-index:1}
+  .node::after{content:"";position:absolute;top:14px;bottom:-24px;width:1px;background:var(--line)}
+  ol.ladder li:last-child .node::after{display:none}
+  ol.ladder li.verdict .node::before{background:var(--ink)}
+  .ladder h4{margin:0;font-size:.9375rem;font-weight:600}
+  .ladder p{font-size:.875rem;color:var(--ink-2);margin-top:2px;max-width:56ch}
+  .ladder .src{font-family:var(--mono);font-size:.6875rem;color:var(--ink-4);margin-top:4px;display:block}
+
+  details.raw{margin-top:var(--s6);border-top:1px solid var(--line)}
+  details.raw summary{
+    list-style:none;cursor:pointer;padding:var(--s3) 0;
+    font-family:var(--mono);font-size:.6875rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+    display:flex;align-items:center;gap:var(--s2);
+  }
+  details.raw summary::-webkit-details-marker{display:none}
+  details.raw summary:hover{color:var(--ink)}
+  details.raw summary::before{content:"+";font-size:.875rem;line-height:1}
+  details.raw[open] summary::before{content:"–"}
+  pre{
+    margin:0 0 var(--s4);padding:var(--s4);background:var(--paper-sunk);border:1px solid var(--line-soft);
+    font-family:var(--mono);font-size:.75rem;line-height:1.65;overflow-x:auto;font-variant-ligatures:none;
+  }
+
+  .vault{margin-top:var(--s6);border:1px solid var(--ink);padding:var(--s5)}
+  .vault dl{margin:var(--s4) 0 0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--s2) var(--s5)}
+  .vault dt{font-family:var(--mono);font-size:.625rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+  .vault dd{margin:0;font-family:var(--mono);font-size:.75rem;word-break:break-all}
+  .caveat{margin-top:var(--s5);font-size:.8125rem;color:var(--ink-3);max-width:60ch;padding-top:var(--s3);border-top:1px dotted var(--line)}
+
+  /* ---------- assets ---------- */
+  .assets{padding:var(--s8) var(--s6) var(--s9)}
+  table{width:100%;border-collapse:collapse;margin-top:var(--s5)}
+  thead th{
+    text-align:left;font-family:var(--mono);font-size:.625rem;letter-spacing:.11em;text-transform:uppercase;
+    color:var(--ink-3);font-weight:500;padding:0 var(--s4) var(--s2) 0;border-bottom:1px solid var(--ink);
+  }
+  tbody td{padding:var(--s3) var(--s4) var(--s3) 0;border-bottom:1px solid var(--line-soft);font-size:.875rem;vertical-align:baseline}
+  tbody tr{transition:background .14s linear}
+  tbody tr:hover{background:var(--paper-sunk)}
+  td.id{font-family:var(--mono);font-weight:500;font-size:.8125rem}
+  td.mono{font-family:var(--mono);font-size:.8125rem;color:var(--ink-2)}
+  .bar{display:flex;align-items:center;gap:var(--s2);font-family:var(--mono);font-size:.75rem}
+  .bar span{display:block;height:6px;background:var(--ink);min-width:1px}
+  .bar em{color:var(--ink-3);font-style:normal}
+  .state{font-family:var(--mono);font-size:.6875rem;letter-spacing:.06em;text-transform:uppercase}
+  .state[data-s="watch"]{border-bottom:2px solid var(--ink)}
+  .state[data-s="baselining"]{color:var(--ink-3)}
+
+  /* ---------- skeleton ---------- */
+  .skeleton{padding:var(--s7) var(--s6)}
+  .sk{background:var(--paper-edge);height:14px;animation:fade 1.1s var(--e-out) infinite alternate}
+  .sk.tall{height:40px}
+  .sk + .sk{margin-top:var(--s3)}
+  @keyframes fade{from{opacity:.45}to{opacity:1}}
+  .booting .workbench,.booting .assets,.booting .masthead{display:none}
+  body:not(.booting) .skeleton{display:none}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:1180px){
+    .panels{grid-template-columns:1fr;gap:var(--s6)}
+  }
+  @media (max-width:1024px){
+    .shell{grid-template-columns:1fr}
+    .rail{
+      position:static;height:auto;flex-direction:row;align-items:center;gap:var(--s5);
+      border-right:0;border-bottom:1px solid var(--line);padding:var(--s4) var(--s5);overflow-x:auto;
+    }
+    .rail .mark{padding-right:0}
+    .nav{flex-direction:row;gap:var(--s4)}
+    .nav a{border-bottom:0;grid-template-columns:auto auto;padding:0;white-space:nowrap}
+    .nav a i{display:none}
+    .rail-foot{margin-left:auto;padding-right:0}
+    .rail-foot small{display:none}
+    .workbench{grid-template-columns:1fr}
+    .queue{border-right:0;border-bottom:1px solid var(--line)}
+    .masthead,.evidence,.assets,.queue-head,.group-label,.row,.empty{padding-left:var(--s5);padding-right:var(--s5)}
+    .assets{padding-bottom:var(--s8)}
+    table thead{display:none}
+    table tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:2px var(--s4);padding:var(--s4) 0;border-bottom:1px solid var(--line-soft)}
+    tbody td{border:0;padding:0}
+    tbody td::before{content:attr(data-label) " ";font-family:var(--mono);font-size:.625rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-4);display:block}
+    td.id{grid-column:1/-1}
+  }
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body class="booting">
+
+<div class="shell">
+  <aside class="rail">
+    <div class="mark">
+      <b>CORVEX</b>
+      <span>Labs · v0.1</span>
+    </div>
+
+    <nav class="nav" aria-label="Sections">
+      <a href="#" aria-current="page"><i>01</i>Evidence<span class="tally" id="navOpen">5</span></a>
+      <a href="#assets"><i>02</i>Assets<span class="tally">4</span></a>
+      <a href="#"><i>03</i>Baseline<span class="tally">3</span></a>
+      <a href="#"><i>04</i>Vault<span class="tally">218</span></a>
+      <a href="#"><i>05</i>Simulator<span class="tally">5</span></a>
+      <a href="#"><i>06</i>Detectors<span class="tally">9</span></a>
+    </nav>
+
+    <div class="rail-foot">
+      <span class="chip-offline">Air-gapped</span>
+      <small>
+        Read-only SPAN mirror<br>
+        No control-loop writes<br>
+        Lab network 192.168.10.0/24
+      </small>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div class="seg">
+        <span class="eyebrow">Segment</span>
+        <strong>Line 3 · Pump Skid</strong>
+      </div>
+      <div class="live"><span class="pulse" aria-hidden="true"></span><span>Capturing</span></div>
+      <div class="spacer"></div>
+      <div class="meter">Detect latency <b id="lat">1.9s</b><em style="font-style:normal;color:var(--ink-4)">/ 5.0 budget</em></div>
+      <div class="meter">Local time <b id="clk">16:04:22</b></div>
+      <button class="btn quiet">Export vault</button>
+    </div>
+
+    <div class="skeleton" aria-hidden="true">
+      <div class="sk" style="width:180px"></div>
+      <div class="sk tall" style="width:60%;margin-top:24px"></div>
+      <div class="sk" style="width:44%"></div>
+      <div class="sk" style="width:38%"></div>
+    </div>
+
+    <header class="masthead">
+      <span class="eyebrow">Passive OT monitoring · Modbus TCP</span>
+      <h1>Every alert arrives with its proof attached.</h1>
+      <p class="lede">Network events, physical sensor readings and detector reasoning are linked into one immutable record before an operator ever sees the alert. Nothing here was inferred from a dashboard alone.</p>
+      <div class="strip">
+        <div><b id="statOpen">5</b><span>Open alerts</span></div>
+        <div><b>3</b><span>Monitored assets</span></div>
+        <div><b>1.9s</b><span>Median detect</span></div>
+        <div><b>218</b><span>Evidence records</span></div>
+        <div><b>4.1%</b><span>False positive rate</span></div>
+      </div>
+    </header>
+
+    <div class="workbench">
+      <section class="queue" aria-label="Alert queue">
+        <div class="queue-head">
+          <span class="eyebrow">Triage queue</span>
+          <div class="filters" role="group" aria-label="Filter alerts">
+            <button data-filter="all" aria-pressed="true">All</button>
+            <button data-filter="open" aria-pressed="false">Open</button>
+            <button data-filter="critical" aria-pressed="false">Critical</button>
+          </div>
+        </div>
+        <div id="queueBody"></div>
+      </section>
+
+      <section class="evidence" id="evidence" aria-live="polite"></section>
+    </div>
+
+    <section class="assets" id="assets">
+      <span class="eyebrow">Asset inventory</span>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Asset</th><th scope="col">Address</th><th scope="col">Protocol</th>
+            <th scope="col">Peers</th><th scope="col">Baseline coverage</th><th scope="col">Last seen</th><th scope="col">State</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="id" data-label="Asset">plc-01</td>
+            <td class="mono" data-label="Address">192.168.10.30</td>
+            <td class="mono" data-label="Protocol">Modbus TCP / 502</td>
+            <td class="mono" data-label="Peers">2</td>
+            <td data-label="Coverage"><div class="bar"><span style="width:88px"></span><em>94%</em></div></td>
+            <td class="mono" data-label="Last seen">16:04:21</td>
+            <td data-label="State"><span class="state" data-s="watch">Under watch</span></td>
+          </tr>
+          <tr>
+            <td class="id" data-label="Asset">plc-02</td>
+            <td class="mono" data-label="Address">192.168.10.31</td>
+            <td class="mono" data-label="Protocol">Modbus TCP / 502</td>
+            <td class="mono" data-label="Peers">1</td>
+            <td data-label="Coverage"><div class="bar"><span style="width:74px"></span><em>79%</em></div></td>
+            <td class="mono" data-label="Last seen">16:04:19</td>
+            <td data-label="State"><span class="state">Nominal</span></td>
+          </tr>
+          <tr>
+            <td class="id" data-label="Asset">hmi-01</td>
+            <td class="mono" data-label="Address">192.168.10.20</td>
+            <td class="mono" data-label="Protocol">Modbus TCP · HTTP</td>
+            <td class="mono" data-label="Peers">3</td>
+            <td data-label="Coverage"><div class="bar"><span style="width:81px"></span><em>86%</em></div></td>
+            <td class="mono" data-label="Last seen">16:04:22</td>
+            <td data-label="State"><span class="state">Nominal</span></td>
+          </tr>
+          <tr>
+            <td class="id" data-label="Asset">motor-01 <span class="mono" style="color:var(--ink-4)">· esp32-01</span></td>
+            <td class="mono" data-label="Address">mqtt/corvex/sensors</td>
+            <td class="mono" data-label="Protocol">MQTT + TLS</td>
+            <td class="mono" data-label="Peers">1</td>
+            <td data-label="Coverage"><div class="bar"><span style="width:38px"></span><em>41%</em></div></td>
+            <td class="mono" data-label="Last seen">16:04:22</td>
+            <td data-label="State"><span class="state" data-s="baselining">Baselining</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="caveat">Coverage is measured against a 6-hour clean-traffic window. Anything under 60% is treated as untrained: the model abstains and only deterministic rules fire.</p>
+    </section>
+  </main>
+</div>
+
+<script>
+const ALERTS = [
+  {
+    id:"ALT-0412", type:"Physical divergence", sev:"critical", asset:"motor-01", t:"16:04:18", ago:"4s ago",
+    detector:"corr.physical_divergence v0.3.1", rule:"PHYSICAL_DIVERGENCE", state:"open",
+    reason:"The controller reports motor speed holding at 40 Hz and the Modbus exchange is perfectly well-formed. The current clamp disagrees: draw is 19.1 A against a calibrated expectation of 11.8 A, with vibration up 240% over its rolling baseline. Either the process value being reported upstream is false, or the machine is failing mechanically. Both need a human.",
+    facts:[["Confidence","0.91"],["Detect latency","1.4s"],["Sensor quality","good"],["Reproduced","3 / 3"]],
+    plot:{title:"Reported speed vs measured current",unit:"normalised",
+      a:[40,40,40,40,40,40,40,40,40,40,40,40], b:[11.6,11.8,11.7,11.9,12.1,13.4,15.2,17.6,18.9,19.1,19.0,19.1],
+      aLabel:"Reported speed (Hz)", bLabel:"Measured current (A)", band:[10.9,12.9]},
+    ladder:[
+      {t:"16:04:16.902",h:"Modbus read response",p:"plc-01 → hmi-01, function code 3, register 40001 = 40. Structurally valid, matches the polling baseline.",s:"suricata · eve-line-8841"},
+      {t:"16:04:17.140",h:"Sensor frame",p:"esp32-01 published current 19.1 A, vibration RMS 0.61 (baseline 0.18). Signed and timestamped at the edge.",s:"mqtt · sensor-000944"},
+      {t:"16:04:18.301",h:"Divergence confirmed",p:"Speed-to-current relationship breached the calibrated envelope for 4 consecutive windows. Evidence record sealed.",s:"corvex · vault-write",v:true}
+    ],
+    raw:`{
+  "event_id": "evt-008841",
+  "timestamp": "2026-08-16T16:04:16.902Z",
+  "source": "suricata",
+  "asset_id": "plc-01",
+  "src_ip": "192.168.10.30",
+  "dst_ip": "192.168.10.20",
+  "protocol": "modbus",
+  "function_code": 3,
+  "register": 40001,
+  "value": 40,
+  "event_type": "read",
+  "raw_ref": "suricata-line-8841"
+}`,
+    hash:"sha256:9f41c0b7e2ad55f3c8b6a1de7740fe2c9ab3d5081e6c47aa2b90d1f4c3e58b76",
+    prev:"sha256:41d7ae09bb1c3f6280e5cc94a7d3b1520f8e6a7c",
+    caveat:"Physical divergence is a hypothesis, not a verdict. The speed-to-current curve is a lab calibration on simulator data and has not been validated against a production drive."
+  },
+  {
+    id:"ALT-0411", type:"Unauthorized write", sev:"high", asset:"plc-01", t:"16:01:07", ago:"3m ago",
+    detector:"rules.unauthorized_write v0.2.0", rule:"UNAUTHORIZED_WRITE", state:"open",
+    reason:"192.168.10.77 wrote to control register 40001 using function code 6. That host has never appeared in the write allow-list and was first seen on the segment eleven minutes ago. The write succeeded at the protocol level.",
+    facts:[["Confidence","1.00"],["Detect latency","0.6s"],["Writer","unlisted"],["Reproduced","3 / 3"]],
+    plot:{title:"Write attempts per minute, by source",unit:"writes/min",
+      a:[2,2,2,2,2,2,2,2,2,2,2,2], b:[0,0,0,0,0,1,4,7,9,6,8,7],
+      aLabel:"Approved writer (hmi-01)", bLabel:"192.168.10.77", band:[0,3]},
+    ladder:[
+      {t:"16:01:06.418",h:"New host on segment",p:"ARP and first TCP handshake from 192.168.10.77 toward port 502. No prior baseline entry.",s:"zeek · conn.log"},
+      {t:"16:01:06.981",h:"Write to control register",p:"Function code 6, register 40001, value 62. Source absent from configs/assets.yml allowed_writers.",s:"suricata · eve-line-8802"},
+      {t:"16:01:07.052",h:"Rule matched",p:"Deterministic match, no model involvement. Severity fixed at high because the target is a control register.",s:"corvex · rule_engine",v:true}
+    ],
+    raw:`{
+  "event_id": "evt-008802",
+  "timestamp": "2026-08-16T16:01:06.981Z",
+  "source": "suricata",
+  "asset_id": "plc-01",
+  "src_ip": "192.168.10.77",
+  "dst_ip": "192.168.10.30",
+  "protocol": "modbus",
+  "function_code": 6,
+  "register": 40001,
+  "value": 62,
+  "event_type": "write",
+  "raw_ref": "suricata-line-8802"
+}`,
+    hash:"sha256:2c8e91af04b7d3e6528f1a09cd47b3e28f60a1d95c7b4e03a2f8d6b1904ce537",
+    prev:"sha256:7be2109cd4f8a30e19bb75c2e0d4a8f13c96b2e7",
+    caveat:"Attack traffic originated from the isolated simulator host. CORVEX did not block, drop or inject anything: detection is passive by design."
+  },
+  {
+    id:"ALT-0409", type:"Replay sequence", sev:"medium", asset:"plc-02", t:"15:52:44", ago:"12m ago",
+    detector:"rules.replay_window v0.1.4", rule:"REPLAY_SEQUENCE", state:"open",
+    reason:"Fourteen Modbus transactions arrived byte-identical to a sequence captured nine minutes earlier, including transaction identifiers. Legitimate polling varies its transaction IDs, so this reads as a recorded exchange being replayed onto the wire.",
+    facts:[["Confidence","0.78"],["Detect latency","2.2s"],["Matched frames","14"],["Reproduced","3 / 3"]],
+    plot:{title:"Transaction ID entropy over time",unit:"bits",
+      a:[7.4,7.5,7.3,7.6,7.4,7.5,7.4,7.5,7.3,7.4,7.5,7.4], b:[7.4,7.5,7.3,7.6,4.1,1.2,0.9,0.8,0.9,1.1,3.9,7.2],
+      aLabel:"Baseline entropy", bLabel:"Observed entropy", band:[6.8,8]},
+    ladder:[
+      {t:"15:52:41.220",h:"Duplicate frame window opened",p:"First repeat of a stored request signature detected against the 15-minute ring buffer.",s:"corvex · replay_window"},
+      {t:"15:52:43.771",h:"Sequence threshold crossed",p:"14 consecutive identical transactions, entropy collapsed from 7.4 to 0.8 bits.",s:"zeek · modbus.log"},
+      {t:"15:52:44.019",h:"Alert raised",p:"Flagged medium: replay is plausible but a misconfigured polling client can produce the same shape.",s:"corvex · rule_engine",v:true}
+    ],
+    raw:`{
+  "event_id": "evt-008640",
+  "timestamp": "2026-08-16T15:52:43.771Z",
+  "source": "zeek",
+  "asset_id": "plc-02",
+  "src_ip": "192.168.10.20",
+  "dst_ip": "192.168.10.31",
+  "protocol": "modbus",
+  "function_code": 3,
+  "transaction_id": 4711,
+  "repeat_count": 14,
+  "event_type": "read",
+  "raw_ref": "zeek-modbus-2261"
+}`,
+    hash:"sha256:b71fa5c2903e84d6172bc0e5f9a34d81027cb6e4a95d3f8021ce7b4a6d05f293",
+    prev:"sha256:c04a8b71ef29d5306a1b4c8f92e07d51ab38c604",
+    caveat:"Entropy thresholds were tuned on 6 hours of simulator traffic. A real plant with static polling clients would need re-tuning before this rule is trustworthy."
+  },
+  {
+    id:"ALT-0407", type:"Rogue device", sev:"high", asset:"seg-ot-1", t:"15:49:02", ago:"15m ago",
+    detector:"rules.new_device v0.2.0", rule:"ROGUE_DEVICE", state:"open",
+    reason:"An unrecorded MAC address began speaking Modbus on the OT segment. It was never present in the 6-hour baseline window and its vendor prefix does not match any inventoried equipment.",
+    facts:[["Confidence","0.96"],["Detect latency","1.1s"],["Vendor prefix","unlisted"],["Reproduced","3 / 3"]],
+    plot:{title:"Distinct hosts observed on OT segment",unit:"hosts",
+      a:[3,3,3,3,3,3,3,3,3,3,3,3], b:[3,3,3,3,3,3,4,4,4,4,4,4],
+      aLabel:"Baseline host count", bLabel:"Observed host count", band:[3,3]},
+    ladder:[
+      {t:"15:49:00.884",h:"Unknown MAC observed",p:"9c:1d:58:44:0a:7e broadcast on 192.168.10.0/24. No baseline record, no inventory entry.",s:"zeek · known_hosts"},
+      {t:"15:49:01.402",h:"OT protocol from unknown host",p:"Host immediately issued Modbus reads against plc-01 and plc-02.",s:"suricata · eve-line-8579"},
+      {t:"15:49:02.117",h:"Asset opened, alert raised",p:"Provisional asset created and pinned to the alert so the operator can accept or reject it.",s:"corvex · asset_registry",v:true}
+    ],
+    raw:`{
+  "event_id": "evt-008579",
+  "timestamp": "2026-08-16T15:49:01.402Z",
+  "source": "zeek",
+  "asset_id": "unknown-9c1d58",
+  "src_ip": "192.168.10.77",
+  "src_mac": "9c:1d:58:44:0a:7e",
+  "protocol": "modbus",
+  "function_code": 3,
+  "event_type": "read",
+  "raw_ref": "zeek-conn-8579"
+}`,
+    hash:"sha256:5ea3d81c46b2907fe1d5c3ba8047f9126dbe3a5c018f7b429d6ac0e35f18b742",
+    prev:"sha256:1fa93c07db6e254c8093ab7f16d2e5c40b78a913",
+    caveat:"On a real plant this rule fires on every maintenance laptop. It needs an operator-owned allow-list workflow before it is anything other than noisy."
+  },
+  {
+    id:"ALT-0403", type:"Timing drift", sev:"low", asset:"plc-01", t:"15:31:55", ago:"32m ago",
+    detector:"baseline.rolling_stats v0.3.0", rule:"TIMING_DRIFT", state:"open",
+    reason:"Median polling interval moved from 250 ms to 388 ms and stayed there for eleven minutes. Not an attack signature on its own, but sustained drift usually means either added load or an interposed device.",
+    facts:[["Confidence","0.62"],["Detect latency","3.4s"],["Drift","+55%"],["Reproduced","2 / 3"]],
+    plot:{title:"Polling interval, rolling median",unit:"ms",
+      a:[250,251,249,250,252,250,249,251,250,250,251,250], b:[251,254,268,291,318,344,362,377,384,388,386,388],
+      aLabel:"Baseline interval", bLabel:"Observed interval", band:[235,275]},
+    ladder:[
+      {t:"15:31:44.100",h:"Interval band exceeded",p:"Rolling median crossed the +2σ envelope derived from the clean window.",s:"corvex · baseline"},
+      {t:"15:31:52.640",h:"Drift sustained",p:"Eleven consecutive windows above the envelope, so this is not a transient spike.",s:"corvex · baseline"},
+      {t:"15:31:55.006",h:"Low-severity alert",p:"Raised for correlation value only. Suppressed from paging.",s:"corvex · rule_engine",v:true}
+    ],
+    raw:`{
+  "event_id": "evt-008201",
+  "timestamp": "2026-08-16T15:31:52.640Z",
+  "source": "corvex.baseline",
+  "asset_id": "plc-01",
+  "metric": "poll_interval_ms",
+  "baseline_median": 250,
+  "observed_median": 388,
+  "window_count": 11,
+  "event_type": "drift",
+  "raw_ref": "baseline-window-3391"
+}`,
+    hash:"sha256:d38c1076b9e4a25fc0187b3ade6529f4108c7ba36e2d9f5401bc8a7e2f36d095",
+    prev:"sha256:9002bd53af17c6e84d1902bb7fa3e5610cd48f27",
+    caveat:"Two of three reruns reproduced this. Sub-second timing on a laptop capture is not reliable enough to page anyone on."
+  },
+  {
+    id:"ALT-0398", type:"Abnormal IT-to-OT flow", sev:"medium", asset:"hmi-01", t:"15:12:30", ago:"52m ago",
+    detector:"rules.it_ot_relation v0.1.2", rule:"IT_TO_OT_RELATION", state:"cleared",
+    reason:"An IT-range host opened a session to the HMI outside the baselined relationship map. Operator dispositioned this as a scheduled patch window and the relationship was added to the allow-list.",
+    facts:[["Confidence","0.71"],["Detect latency","1.8s"],["Disposition","benign"],["Closed by","operator 02"]],
+    plot:{title:"IT to OT session count",unit:"sessions",
+      a:[0,0,0,0,0,0,0,0,0,0,0,0], b:[0,0,1,3,4,4,3,1,0,0,0,0],
+      aLabel:"Baselined sessions", bLabel:"Observed sessions", band:[0,1]},
+    ladder:[
+      {t:"15:12:28.410",h:"Cross-zone session",p:"10.44.2.19 (IT range) reached hmi-01 on 3389. No baselined relationship.",s:"zeek · conn.log"},
+      {t:"15:12:30.008",h:"Alert raised",p:"Flagged for review rather than escalation, since the target is an HMI and not a controller.",s:"corvex · rule_engine"},
+      {t:"15:26:11.900",h:"Dispositioned benign",p:"Operator matched the session to an approved patch window. Relationship added to the baseline map.",s:"corvex · vault-append",v:true}
+    ],
+    raw:`{
+  "event_id": "evt-007904",
+  "timestamp": "2026-08-16T15:12:28.410Z",
+  "source": "zeek",
+  "asset_id": "hmi-01",
+  "src_ip": "10.44.2.19",
+  "dst_ip": "192.168.10.20",
+  "protocol": "rdp",
+  "dst_port": 3389,
+  "event_type": "session",
+  "raw_ref": "zeek-conn-7904"
+}`,
+    hash:"sha256:8ab04f2c71d95e3608bc1a7fd249e0b53c7f18a6d40e9b2751ca63f8e07d2b41",
+    prev:"sha256:6cd3801af92b74e50a18cb3d7f26e9401b58ac73",
+    caveat:"Dispositioning edits the baseline. Every change is appended to the vault with the operator identity, never overwritten."
+  }
+];
+
+let selected = ALERTS[0].id;
+let filter = "all";
+
+const qBody = document.getElementById("queueBody");
+const evEl  = document.getElementById("evidence");
+
+const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+function visible(){
+  return ALERTS.filter(a =>
+    filter === "all" ? true :
+    filter === "open" ? a.state === "open" :
+    a.sev === "critical");
+}
+
+function renderQueue(){
+  const list = visible();
+  if(!list.length){
+    qBody.innerHTML = `<div class="empty">
+      <h3>Queue clear.</h3>
+      <p>Capture is still running and the vault keeps every dispositioned record. Widen the filter to review closed alerts.</p>
+    </div>`;
+    return;
+  }
+  const open = list.filter(a => a.state === "open");
+  const done = list.filter(a => a.state === "cleared");
+  let html = "";
+  const rows = arr => `<ol class="alerts" role="listbox">` + arr.map(a => `
+    <li role="option" class="${a.state === "cleared" ? "cleared" : ""}" aria-selected="${a.id === selected}">
+      <button class="row" data-id="${a.id}">
+        <span class="sev" data-sev="${a.sev}" aria-label="${a.sev}"></span>
+        <span>
+          <span class="type">${esc(a.type)}</span>
+          <span class="meta">${a.id} · ${esc(a.asset)}</span>
+        </span>
+        <span class="clock">${a.ago}</span>
+      </button>
+    </li>`).join("") + `</ol>`;
+
+  if(open.length) html += `<div class="group-label"><span class="eyebrow">Awaiting disposition · ${open.length}</span></div>` + rows(open);
+  if(done.length) html += `<div class="group-label"><span class="eyebrow">Dispositioned · ${done.length}</span></div>` + rows(done);
+  qBody.innerHTML = html;
+
+  const openCount = ALERTS.filter(a => a.state === "open").length;
+  document.getElementById("navOpen").textContent = openCount;
+  document.getElementById("statOpen").textContent = openCount;
+}
+
+function plot(p){
+  const W = 620, H = 190, PAD = 8;
+  const all = p.a.concat(p.b, p.band);
+  const min = Math.min(...all), max = Math.max(...all);
+  const span = (max - min) || 1;
+  const x = i => PAD + i * ((W - PAD * 2) / (p.a.length - 1));
+  const y = v => H - PAD - ((v - min) / span) * (H - PAD * 2);
+  const path = arr => arr.map((v,i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const bandTop = y(p.band[1]), bandBottom = y(p.band[0]);
+  const last = p.b[p.b.length - 1];
+
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(p.title)}">
+    <defs>
+      <pattern id="hatch" width="5" height="5" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+        <line x1="0" y1="0" x2="0" y2="5" stroke="oklch(85% 0.006 265)" stroke-width="1"/>
+      </pattern>
+    </defs>
+    <rect x="${PAD}" y="${Math.min(bandTop,bandBottom)}" width="${W - PAD * 2}" height="${Math.max(Math.abs(bandBottom - bandTop), 2)}" fill="url(#hatch)"/>
+    ${[0,1,2].map(i => `<line x1="${PAD}" x2="${W - PAD}" y1="${PAD + i * ((H - PAD * 2) / 2)}" y2="${PAD + i * ((H - PAD * 2) / 2)}" stroke="oklch(92% 0.005 265)" stroke-width="1"/>`).join("")}
+    <path d="${path(p.a)}" fill="none" stroke="oklch(60% 0.008 265)" stroke-width="1.25" stroke-dasharray="4 3"/>
+    <path d="${path(p.b)}" fill="none" stroke="oklch(17.5% 0.013 265)" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="${x(p.b.length - 1).toFixed(1)}" cy="${y(last).toFixed(1)}" r="3.5" fill="oklch(17.5% 0.013 265)"/>
+    <text x="${(x(p.b.length - 1) - 6).toFixed(1)}" y="${(y(last) - 12).toFixed(1)}" text-anchor="end"
+      font-family="IBM Plex Mono, monospace" font-size="11" fill="oklch(17.5% 0.013 265)">${last}</text>
+  </svg>`;
+}
+
+function renderEvidence(){
+  const a = ALERTS.find(x => x.id === selected);
+  if(!a){
+    evEl.innerHTML = `<div class="empty" style="padding-left:0">
+      <h3>Nothing selected.</h3>
+      <p>Pick an alert from the queue to open its linked network events, sensor readings and detector reasoning.</p></div>`;
+    return;
+  }
+  evEl.innerHTML = `
+    <div class="ev-head">
+      <div>
+        <span class="sev-tag" data-sev="${a.sev}">${a.sev} · ${a.rule}</span>
+        <h2>${esc(a.type)} on ${esc(a.asset)}</h2>
+      </div>
+      <div class="ev-actions">
+        ${a.state === "open"
+          ? `<button class="btn solid" id="ack">Acknowledge</button>`
+          : `<button class="btn" disabled>Dispositioned</button>`}
+        <button class="btn quiet" id="exp">Report</button>
+      </div>
+    </div>
+
+    <dl class="facts">
+      <div><dt>Alert</dt><dd>${a.id}</dd></div>
+      <div><dt>Raised</dt><dd>${a.t}</dd></div>
+      ${a.facts.map(([k,v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}
+    </dl>
+
+    <p class="reason">${esc(a.reason)}</p>
+
+    <div class="panels">
+      <div>
+        <div class="panel-title"><h3>${esc(a.plot.title)}</h3><span>${esc(a.plot.unit)}</span></div>
+        <div class="plot">${plot(a.plot)}</div>
+        <div class="legend">
+          <span><i></i>${esc(a.plot.bLabel)}</span>
+          <span class="dashed"><i></i>${esc(a.plot.aLabel)}</span>
+          <span style="color:var(--ink-3)">Hatched band: calibrated envelope</span>
+        </div>
+        <details class="raw">
+          <summary>Normalized event</summary>
+          <pre>${esc(a.raw)}</pre>
+        </details>
+      </div>
+
+      <div>
+        <div class="panel-title"><h3>Correlation trail</h3><span>3 links</span></div>
+        <ol class="ladder">
+          ${a.ladder.map(l => `<li class="${l.v ? "verdict" : ""}">
+            <time>${l.t}</time>
+            <span class="node" aria-hidden="true"></span>
+            <div><h4>${esc(l.h)}</h4><p>${esc(l.p)}</p><span class="src">${esc(l.s)}</span></div>
+          </li>`).join("")}
+        </ol>
+
+        <div class="vault">
+          <span class="eyebrow">Vault record</span>
+          <dl>
+            <dt>Digest</dt><dd>${a.hash}</dd>
+            <dt>Prev</dt><dd>${a.prev}</dd>
+            <dt>Detector</dt><dd>${esc(a.detector)}</dd>
+            <dt>Disposition</dt><dd>${a.state === "open" ? "pending operator review" : "benign · signed"}</dd>
+          </dl>
+        </div>
+        <p class="caveat">${esc(a.caveat)}</p>
+      </div>
+    </div>`;
+
+  const ack = document.getElementById("ack");
+  if(ack) ack.addEventListener("click", () => {
+    a.state = "cleared";
+    a.facts = [["Confidence", a.facts[0][1]], ["Detect latency", a.facts[1][1]], ["Disposition","benign"], ["Closed by","operator 01"]];
+    renderQueue(); renderEvidence();
+  });
+  const exp = document.getElementById("exp");
+  if(exp) exp.addEventListener("click", () => {
+    exp.textContent = "Sealed ✓"; exp.disabled = true;
+  });
+}
+
+qBody.addEventListener("click", e => {
+  const btn = e.target.closest(".row");
+  if(!btn) return;
+  selected = btn.dataset.id;
+  renderQueue(); renderEvidence();
+});
+
+document.querySelectorAll(".filters button").forEach(b => {
+  b.addEventListener("click", () => {
+    filter = b.dataset.filter;
+    document.querySelectorAll(".filters button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    const list = visible();
+    if(!list.some(a => a.id === selected)) selected = list.length ? list[0].id : null;
+    renderQueue(); renderEvidence();
+  });
+});
+
+document.addEventListener("keydown", e => {
+  if(!["j","k","ArrowDown","ArrowUp"].includes(e.key)) return;
+  const list = visible(); if(!list.length) return;
+  const i = list.findIndex(a => a.id === selected);
+  const next = (e.key === "j" || e.key === "ArrowDown")
+    ? Math.min(i + 1, list.length - 1) : Math.max(i - 1, 0);
+  selected = list[next].id;
+  renderQueue(); renderEvidence();
+});
+
+// instrument readouts
+const clk = document.getElementById("clk"), lat = document.getElementById("lat");
+let sec = 22;
+setInterval(() => {
+  sec = (sec + 1) % 60;
+  clk.textContent = `16:04:${String(sec).padStart(2,"0")}`;
+  lat.textContent = (1.6 + (sec % 7) * 0.09).toFixed(1) + "s";
+}, 1000);
+
+renderQueue(); renderEvidence();
+setTimeout(() => document.body.classList.remove("booting"), 650);
+</script>
+</body>
+</html>
