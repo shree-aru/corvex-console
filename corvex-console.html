@@ -296,9 +296,49 @@
     td.id{grid-column:1/-1}
   }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  /* ---------- drop zone ---------- */
+  .dropzone{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;pointer-events:none}
+  .dropzone.active{display:flex}
+  .dropzone-inner{border:2px dashed var(--paper);padding:var(--s8);text-align:center;color:var(--paper);font-family:var(--mono);font-size:1.125rem;letter-spacing:.08em;text-transform:uppercase}
+
+  /* ---------- topology ---------- */
+  .topo{margin-top:var(--s6);border-top:1px solid var(--line);padding-top:var(--s5)}
+  .topo svg{display:block;width:100%;max-width:700px;height:auto}
+  .topo-node{cursor:default}
+  .topo-node circle{stroke:var(--ink);stroke-width:1.5;fill:var(--paper);transition:fill .2s}
+  .topo-node.alert-critical circle{fill:var(--ink)}
+  .topo-node.alert-high circle{fill:var(--paper);stroke-dasharray:3 2}
+  .topo-node.alert-medium circle{fill:var(--paper-sunk)}
+  .topo-node text{font-family:var(--mono);font-size:10px;fill:var(--ink);text-anchor:middle}
+  .topo-node .topo-label{font-size:9px;fill:var(--ink-3);letter-spacing:.06em;text-transform:uppercase}
+  .topo-link{stroke:var(--line);stroke-width:1}
+  .topo-link.active{stroke:var(--ink);stroke-width:1.5}
+  .topo-link-label{font-family:var(--mono);font-size:8px;fill:var(--ink-4)}
+
+  /* ---------- disposition ---------- */
+  .dispo-form{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s3);align-items:center}
+  .dispo-form select,.dispo-form input{font-family:var(--mono);font-size:.75rem;padding:5px 8px;border:1px solid var(--line);background:var(--paper);color:var(--ink);outline:none}
+  .dispo-form select:focus,.dispo-form input:focus{border-color:var(--ink)}
+  .dispo-form input{flex:1;min-width:160px}
+  .dispo-form .btn{font-size:.625rem;padding:5px 10px}
+
+  /* ---------- campaign ---------- */
+  .campaign-tag{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:.5625rem;letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--ink);padding:2px 6px;margin-left:var(--s2);vertical-align:middle}
+  .campaign-tag::before{content:"⬡";font-size:.5rem}
+
+  /* ---------- chain verify ---------- */
+  .chain-result{font-family:var(--mono);font-size:.6875rem;padding:var(--s3) var(--s4);border:1px solid var(--line);margin-top:var(--s3);display:none}
+  .chain-result.pass{border-color:var(--ink);color:var(--ink)}
+  .chain-result.fail{border-color:var(--ink);background:var(--ink);color:var(--paper)}
+
+  /* ---------- stix ---------- */
+  .topbar-actions{display:flex;gap:var(--s2);align-items:center}
 </style>
 </head>
 <body class="booting">
+
+<div class="dropzone" id="dropzone"><div class="dropzone-inner">Drop Suricata EVE JSON or Zeek logs</div></div>
 
 <div class="shell">
   <aside class="rail">
@@ -336,8 +376,13 @@
       <div class="spacer"></div>
       <div class="meter">Detect latency <b id="lat">1.9s</b><em style="font-style:normal;color:var(--ink-4)">/ 5.0 budget</em></div>
       <div class="meter">Local time <b id="clk">16:04:22</b></div>
-      <button class="btn quiet">Export vault</button>
+      <div class="topbar-actions">
+        <button class="btn quiet" id="exportBtn">Export vault</button>
+        <button class="btn quiet" id="stixBtn">STIX 2.1</button>
+        <button class="btn quiet" id="verifyBtn">Verify chain</button>
+      </div>
     </div>
+    <div class="chain-result" id="chainResult"></div>
 
     <div class="skeleton" aria-hidden="true">
       <div class="sk" style="width:180px"></div>
@@ -424,6 +469,11 @@
         </tbody>
       </table>
       <p class="caveat">Coverage is measured against a 6-hour clean-traffic window. Anything under 60% is treated as untrained: the model abstains and only deterministic rules fire.</p>
+
+      <div class="topo">
+        <span class="eyebrow">Network topology</span>
+        <svg id="topoSvg" viewBox="0 0 700 220" role="img" aria-label="OT network topology"></svg>
+      </div>
     </section>
   </main>
 </div>
@@ -880,7 +930,7 @@ function updateStats(){
 }
 
 // ─── Export Vault — real JSON download ───
-document.querySelector('.topbar .btn.quiet').addEventListener('click', function(){
+document.getElementById('exportBtn').addEventListener('click', function(){
   const payload = {
     corvex_version: '0.1.0',
     export_timestamp: new Date().toISOString(),
@@ -1140,6 +1190,368 @@ function scheduleNextAlert(){
   setTimeout(() => { generateAlert(); scheduleNextAlert(); }, delay);
 }
 scheduleNextAlert();
+
+// ═══════════════════════════════════════════════════
+// UPGRADE 1 — Real SHA-256 Hash Chain (Web Crypto API)
+// ═══════════════════════════════════════════════════
+async function sha256(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return 'sha256:' + Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function rebuildHashChain(){
+  let prev = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
+  for(let i = ALERTS.length - 1; i >= 0; i--){
+    const a = ALERTS[i];
+    const data = JSON.stringify({id:a.id,type:a.type,sev:a.sev,asset:a.asset,t:a.t,rule:a.rule,state:a.state});
+    a.prev = prev;
+    a.hash = await sha256(data + prev);
+    prev = a.hash;
+  }
+}
+// Rebuild chain on load
+rebuildHashChain();
+
+// Verify chain button
+document.getElementById('verifyBtn').addEventListener('click', async function(){
+  const el = document.getElementById('chainResult');
+  el.style.display = 'block';
+  el.className = 'chain-result';
+  el.textContent = 'Verifying ' + ALERTS.length + ' records…';
+  let prev = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
+  let valid = true;
+  for(let i = ALERTS.length - 1; i >= 0; i--){
+    const a = ALERTS[i];
+    const data = JSON.stringify({id:a.id,type:a.type,sev:a.sev,asset:a.asset,t:a.t,rule:a.rule,state:a.state});
+    const expected = await sha256(data + prev);
+    if(a.hash !== expected || a.prev !== prev){ valid = false; break; }
+    prev = a.hash;
+  }
+  el.className = 'chain-result ' + (valid ? 'pass' : 'fail');
+  el.textContent = valid
+    ? `✓ Chain intact · ${ALERTS.length} records verified · head: ${ALERTS[0].hash.slice(0,24)}…`
+    : `✗ Chain broken — tamper detected`;
+  setTimeout(() => { el.style.display = 'none'; }, 6000);
+});
+
+// ═══════════════════════════════════════════════════
+// UPGRADE 2 — Operator Disposition Workflow
+// ═══════════════════════════════════════════════════
+let operatorId = localStorage.getItem('corvex_operator') || '';
+if(!operatorId){
+  operatorId = 'operator-' + String(Math.floor(Math.random()*99)+1).padStart(2,'0');
+  localStorage.setItem('corvex_operator', operatorId);
+}
+
+// Override the patched renderEvidence to add disposition form
+const prevRenderEvidence = renderEvidence;
+renderEvidence = function(){
+  prevRenderEvidence();
+  const ack = document.getElementById('ack');
+  if(!ack) return;
+  // Replace simple click with disposition form
+  ack.onclick = null;
+  // Remove old listeners by replacing node
+  const newAck = ack.cloneNode(true);
+  ack.parentNode.replaceChild(newAck, ack);
+  newAck.addEventListener('click', function(){
+    const actions = this.closest('.ev-actions');
+    if(actions.querySelector('.dispo-form')) return; // already open
+    this.style.display = 'none';
+    const form = document.createElement('div');
+    form.className = 'dispo-form';
+    form.innerHTML = `
+      <select id="dispoClass">
+        <option value="benign">Benign</option>
+        <option value="suspicious">Suspicious</option>
+        <option value="malicious">Confirmed Malicious</option>
+      </select>
+      <input type="text" id="dispoNote" placeholder="Operator notes…">
+      <button class="btn solid" id="dispoSubmit">Sign &amp; seal</button>
+    `;
+    actions.appendChild(form);
+    document.getElementById('dispoSubmit').addEventListener('click', async function(){
+      const a = ALERTS.find(x => x.id === selected);
+      if(!a) return;
+      const cls = document.getElementById('dispoClass').value;
+      const note = document.getElementById('dispoNote').value || '—';
+      a.state = 'cleared';
+      a.facts = [['Confidence', a.facts[0][1]], ['Detect latency', a.facts[1][1]], ['Disposition', cls], ['Closed by', operatorId]];
+      a._dispoNote = note;
+      a._dispoTime = new Date().toISOString();
+      await rebuildHashChain();
+      saveState(); updateStats(); renderQueue(); renderEvidence();
+    });
+  });
+};
+// Re-render with new handler
+renderEvidence();
+
+// ═══════════════════════════════════════════════════
+// UPGRADE 3 — Network Topology (Pure SVG)
+// ═══════════════════════════════════════════════════
+const TOPO_NODES = [
+  {id:'hmi-01', x:350, y:40, r:18, label:'HMI-01', ip:'192.168.10.20'},
+  {id:'plc-01', x:180, y:130, r:16, label:'PLC-01', ip:'192.168.10.30'},
+  {id:'plc-02', x:520, y:130, r:16, label:'PLC-02', ip:'192.168.10.31'},
+  {id:'motor-01', x:100, y:200, r:12, label:'MOTOR-01', ip:'ESP32'},
+  {id:'seg-ot-1', x:600, y:200, r:10, label:'ROGUE?', ip:'192.168.10.77'},
+];
+const TOPO_LINKS = [
+  {s:'hmi-01',t:'plc-01',proto:'Modbus/502'},
+  {s:'hmi-01',t:'plc-02',proto:'Modbus/502'},
+  {s:'plc-01',t:'motor-01',proto:'MQTT'},
+  {s:'plc-01',t:'seg-ot-1',proto:''},
+  {s:'plc-02',t:'seg-ot-1',proto:''},
+];
+
+function renderTopology(){
+  const svg = document.getElementById('topoSvg');
+  if(!svg) return;
+  const nodeMap = {};
+  TOPO_NODES.forEach(n => { nodeMap[n.id] = n; });
+  // Determine alert severity per asset
+  const assetSev = {};
+  ALERTS.filter(a => a.state === 'open').forEach(a => {
+    const cur = assetSev[a.asset];
+    const rank = {critical:3,high:2,medium:1,low:0};
+    if(!cur || rank[a.sev] > rank[cur]) assetSev[a.asset] = a.sev;
+  });
+
+  let html = '';
+  // Links
+  TOPO_LINKS.forEach(l => {
+    const s = nodeMap[l.s], t = nodeMap[l.t];
+    if(!s||!t) return;
+    const active = assetSev[l.s] || assetSev[l.t];
+    html += `<line class="topo-link${active?' active':''}" x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}"/>`;
+    if(l.proto){
+      const mx = (s.x+t.x)/2, my = (s.y+t.y)/2;
+      html += `<text class="topo-link-label" x="${mx}" y="${my-5}" text-anchor="middle">${l.proto}</text>`;
+    }
+  });
+  // Nodes
+  TOPO_NODES.forEach(n => {
+    const sev = assetSev[n.id] || '';
+    const cls = sev ? ` alert-${sev}` : '';
+    html += `<g class="topo-node${cls}" transform="translate(${n.x},${n.y})">`;
+    html += `<circle r="${n.r}"/>`;
+    html += `<text dy="3" fill="${sev==='critical'?'var(--paper)':'var(--ink)'}">${n.label}</text>`;
+    html += `<text class="topo-label" dy="${n.r+14}">${n.ip}</text>`;
+    html += `</g>`;
+  });
+  svg.innerHTML = html;
+}
+renderTopology();
+setInterval(renderTopology, 5000);
+
+// ═══════════════════════════════════════════════════
+// UPGRADE 4 — STIX 2.1 Export
+// ═══════════════════════════════════════════════════
+document.getElementById('stixBtn').addEventListener('click', function(){
+  const bundle = {
+    type: 'bundle',
+    id: 'bundle--' + crypto.randomUUID(),
+    objects: []
+  };
+  // Identity
+  const identity = {
+    type: 'identity', spec_version: '2.1',
+    id: 'identity--' + crypto.randomUUID(),
+    created: new Date().toISOString(), modified: new Date().toISOString(),
+    name: 'CORVEX Labs', identity_class: 'system',
+    description: 'Passive OT security monitoring console'
+  };
+  bundle.objects.push(identity);
+
+  // Map each alert
+  ALERTS.forEach(a => {
+    const ts = new Date().toISOString();
+    // Indicator
+    const indicator = {
+      type: 'indicator', spec_version: '2.1',
+      id: 'indicator--' + crypto.randomUUID(),
+      created: ts, modified: ts,
+      name: `${a.type} (${a.id})`,
+      description: a.reason,
+      indicator_types: [a.sev === 'critical' ? 'malicious-activity' : a.sev === 'high' ? 'anomalous-activity' : 'benign'],
+      pattern: `[network-traffic:dst_port = 502 AND network-traffic:protocols[*] = 'modbus']`,
+      pattern_type: 'stix',
+      valid_from: ts,
+      labels: [a.sev, a.rule],
+      confidence: Math.round(parseFloat(a.facts[0]?.[1] || '0') * 100),
+      created_by_ref: identity.id
+    };
+    bundle.objects.push(indicator);
+
+    // Infrastructure (asset)
+    const infra = {
+      type: 'infrastructure', spec_version: '2.1',
+      id: 'infrastructure--' + crypto.randomUUID(),
+      created: ts, modified: ts,
+      name: a.asset,
+      infrastructure_types: ['workstation'],
+      created_by_ref: identity.id
+    };
+    bundle.objects.push(infra);
+
+    // Sighting
+    const sighting = {
+      type: 'sighting', spec_version: '2.1',
+      id: 'sighting--' + crypto.randomUUID(),
+      created: ts, modified: ts,
+      first_seen: ts, last_seen: ts, count: 1,
+      sighting_of_ref: indicator.id,
+      where_sighted_refs: [infra.id],
+      created_by_ref: identity.id
+    };
+    bundle.objects.push(sighting);
+  });
+
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const dl = document.createElement('a');
+  dl.href = url; dl.download = `corvex-stix-${Date.now()}.stix.json`; dl.click();
+  URL.revokeObjectURL(url);
+  this.textContent = 'Exported ✓';
+  setTimeout(() => { this.textContent = 'STIX 2.1'; }, 2000);
+});
+
+// ═══════════════════════════════════════════════════
+// UPGRADE 5 — Drag-and-Drop Log Import
+// ═══════════════════════════════════════════════════
+const dropzone = document.getElementById('dropzone');
+let dragCount = 0;
+document.addEventListener('dragenter', e => { e.preventDefault(); dragCount++; dropzone.classList.add('active'); });
+document.addEventListener('dragleave', e => { dragCount--; if(dragCount <= 0){ dropzone.classList.remove('active'); dragCount = 0; }});
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', async e => {
+  e.preventDefault(); dropzone.classList.remove('active'); dragCount = 0;
+  for(const file of e.dataTransfer.files){
+    const text = await file.text();
+    if(file.name.endsWith('.json') || file.name.includes('eve')){
+      parseEveJson(text);
+    } else {
+      parseZeekLog(text);
+    }
+  }
+});
+
+function parseEveJson(text){
+  const lines = text.split('\n').filter(l => l.trim());
+  let count = 0;
+  lines.forEach(line => {
+    try {
+      const evt = JSON.parse(line);
+      if(evt.event_type === 'alert' || (evt.app_proto === 'modbus')){
+        alertCounter++;
+        const now = new Date();
+        const a = {
+          id: 'ALT-' + String(alertCounter).padStart(4,'0'),
+          type: evt.alert?.signature || 'Imported: ' + (evt.event_type || 'unknown'),
+          sev: evt.alert?.severity === 1 ? 'critical' : evt.alert?.severity === 2 ? 'high' : 'medium',
+          asset: evt.dest_ip || 'unknown',
+          t: now.toTimeString().slice(0,8), ago: '0s ago', _raisedAt: Date.now(),
+          detector: 'import.suricata_eve v1.0', rule: 'IMPORTED_EVE',
+          state: 'open',
+          reason: `Imported from Suricata EVE log: ${evt.alert?.signature || evt.event_type}. Source: ${evt.src_ip}:${evt.src_port} → ${evt.dest_ip}:${evt.dest_port}.`,
+          facts:[['Confidence','1.00'],['Detect latency','0.0s'],['Source',evt.src_ip||'—'],['Import','suricata']],
+          plot:{title:'Imported event',unit:'count',a:[0,0,0,0,0,0,0,0,0,0,0,0],b:[0,0,0,0,0,0,0,0,0,0,0,1],aLabel:'Baseline',bLabel:'Observed',band:[0,0]},
+          ladder:[{t:now.toTimeString().slice(0,12),h:'Event imported',p:JSON.stringify(evt).slice(0,200),s:'suricata · eve',v:true}],
+          raw: JSON.stringify(evt, null, 2),
+          hash:'pending', prev:'pending',
+          caveat:'This alert was imported from a Suricata EVE JSON log file. Evidence chain was computed post-import.'
+        };
+        ALERTS.unshift(a);
+        count++;
+      }
+    } catch(e){}
+  });
+  if(count > 0){
+    selected = ALERTS[0].id;
+    rebuildHashChain().then(() => { saveState(); updateStats(); renderQueue(); renderEvidence(); renderTopology(); });
+  }
+}
+
+function parseZeekLog(text){
+  const lines = text.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+  let count = 0;
+  lines.forEach(line => {
+    const fields = line.split('\t');
+    if(fields.length < 8) return;
+    alertCounter++;
+    const now = new Date();
+    const a = {
+      id: 'ALT-' + String(alertCounter).padStart(4,'0'),
+      type: 'Imported: Zeek connection',
+      sev: 'medium', asset: fields[4] || 'unknown',
+      t: now.toTimeString().slice(0,8), ago: '0s ago', _raisedAt: Date.now(),
+      detector: 'import.zeek v1.0', rule: 'IMPORTED_ZEEK', state: 'open',
+      reason: `Imported from Zeek log. Connection: ${fields[2]}:${fields[3]} → ${fields[4]}:${fields[5]}, protocol: ${fields[6]}, service: ${fields[7]}.`,
+      facts:[['Confidence','0.80'],['Detect latency','0.0s'],['Source',fields[2]||'—'],['Import','zeek']],
+      plot:{title:'Imported event',unit:'count',a:[0,0,0,0,0,0,0,0,0,0,0,0],b:[0,0,0,0,0,0,0,0,0,0,0,1],aLabel:'Baseline',bLabel:'Observed',band:[0,0]},
+      ladder:[{t:now.toTimeString().slice(0,12),h:'Zeek log imported',p:line.slice(0,200),s:'zeek · conn.log',v:true}],
+      raw: line,
+      hash:'pending', prev:'pending',
+      caveat:'This alert was imported from a Zeek log file.'
+    };
+    ALERTS.unshift(a);
+    count++;
+  });
+  if(count > 0){
+    selected = ALERTS[0].id;
+    rebuildHashChain().then(() => { saveState(); updateStats(); renderQueue(); renderEvidence(); renderTopology(); });
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// UPGRADE 6 — Multi-Stage Attack Correlation
+// ═══════════════════════════════════════════════════
+const ATTACK_PATTERNS = [
+  {stages:['ROGUE_DEVICE','UNAUTHORIZED_WRITE','PHYSICAL_DIVERGENCE'], name:'Full-chain OT compromise'},
+  {stages:['ROGUE_DEVICE','UNAUTHORIZED_WRITE'], name:'Reconnaissance → Exploitation'},
+  {stages:['REPLAY_SEQUENCE','TIMING_DRIFT'], name:'Evasion + Interference'},
+];
+
+function correlateAttacks(){
+  // Check if recent alerts form a known attack pattern
+  const recent = ALERTS.filter(a => a.state === 'open').slice(0, 15);
+  const rules = recent.map(a => a.rule);
+  ATTACK_PATTERNS.forEach(pat => {
+    const matched = pat.stages.every(s => rules.includes(s));
+    if(matched){
+      const involved = recent.filter(a => pat.stages.includes(a.rule));
+      involved.forEach(a => { a._campaign = pat.name; });
+    }
+  });
+}
+// Run correlation every 10s
+setInterval(correlateAttacks, 10000);
+correlateAttacks();
+
+// Patch renderEvidence to show campaign badge
+const prevRE2 = renderEvidence;
+renderEvidence = function(){
+  prevRE2();
+  const a = ALERTS.find(x => x.id === selected);
+  if(a && a._campaign){
+    const h2 = document.querySelector('#evidence h2');
+    if(h2 && !h2.querySelector('.campaign-tag')){
+      h2.insertAdjacentHTML('afterend', `<span class="campaign-tag">${a._campaign}</span>`);
+    }
+  }
+  // Show disposition notes if present
+  if(a && a._dispoNote && a.state === 'cleared'){
+    const caveat = document.querySelector('#evidence .caveat');
+    if(caveat && !caveat.dataset.noted){
+      caveat.dataset.noted = '1';
+      caveat.insertAdjacentHTML('beforebegin',
+        `<p class="caveat" style="border-top-style:solid"><strong>Operator note (${a._dispoTime?.slice(11,19) || '—'}):</strong> ${esc(a._dispoNote)}</p>`);
+    }
+  }
+};
+renderEvidence();
+
 </script>
 </body>
 </html>
