@@ -755,16 +755,7 @@ function renderEvidence(){
       </div>
     </div>`;
 
-  const ack = document.getElementById("ack");
-  if(ack) ack.addEventListener("click", () => {
-    a.state = "cleared";
-    a.facts = [["Confidence", a.facts[0][1]], ["Detect latency", a.facts[1][1]], ["Disposition","benign"], ["Closed by","operator 01"]];
-    renderQueue(); renderEvidence();
-  });
-  const exp = document.getElementById("exp");
-  if(exp) exp.addEventListener("click", () => {
-    exp.textContent = "Sealed ✓"; exp.disabled = true;
-  });
+  // Event handlers are attached by the patched renderEvidence wrapper below
 }
 
 qBody.addEventListener("click", e => {
@@ -794,17 +785,361 @@ document.addEventListener("keydown", e => {
   renderQueue(); renderEvidence();
 });
 
-// instrument readouts
-const clk = document.getElementById("clk"), lat = document.getElementById("lat");
-let sec = 22;
-setInterval(() => {
-  sec = (sec + 1) % 60;
-  clk.textContent = `16:04:${String(sec).padStart(2,"0")}`;
-  lat.textContent = (1.6 + (sec % 7) * 0.09).toFixed(1) + "s";
-}, 1000);
+// ─── localStorage persistence ───
+const STORAGE_KEY = 'corvex_state_v1';
+function saveState(){
+  try {
+    const s = { alerts: ALERTS.map(a => ({id:a.id, state:a.state, facts:a.facts})), selected, filter };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  } catch(e){}
+}
+function loadState(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return;
+    const s = JSON.parse(raw);
+    if(s.alerts) s.alerts.forEach(sa => {
+      const a = ALERTS.find(x => x.id === sa.id);
+      if(a){ a.state = sa.state; a.facts = sa.facts; }
+    });
+    if(s.selected) selected = s.selected;
+    if(s.filter) filter = s.filter;
+    document.querySelectorAll('.filters button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.filter === filter)));
+  } catch(e){}
+}
+loadState();
 
-renderQueue(); renderEvidence();
+// ─── Real system clock ───
+const clk = document.getElementById("clk"), lat = document.getElementById("lat");
+const startTime = Date.now();
+function updateClock(){
+  const now = new Date();
+  clk.textContent = now.toTimeString().slice(0,8);
+  // Compute real median latency from alert data
+  const latencies = ALERTS.filter(a => a.state === 'open').map(a => {
+    const f = a.facts.find(x => x[0] === 'Detect latency');
+    return f ? parseFloat(f[1]) : null;
+  }).filter(v => v !== null);
+  if(latencies.length){
+    latencies.sort((a,b) => a - b);
+    const med = latencies[Math.floor(latencies.length / 2)];
+    lat.textContent = med.toFixed(1) + 's';
+  }
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ─── Live "ago" timestamps ───
+ALERTS.forEach(a => { a._raisedAt = a._raisedAt || Date.now() - parseAgo(a.ago); });
+function parseAgo(s){
+  const m = s.match(/(\d+)\s*(s|m|h)/);
+  if(!m) return 0;
+  const v = parseInt(m[1]);
+  return v * (m[2]==='s'?1000 : m[2]==='m'?60000 : 3600000);
+}
+function formatAgo(ms){
+  const s = Math.floor(ms/1000);
+  if(s < 60) return s + 's ago';
+  const m = Math.floor(s/60);
+  if(m < 60) return m + 'm ago';
+  return Math.floor(m/60) + 'h ago';
+}
+setInterval(() => {
+  const now = Date.now();
+  ALERTS.forEach(a => { a.ago = formatAgo(now - a._raisedAt); });
+  renderQueue();
+}, 5000);
+
+// ─── Update asset "last seen" in real time ───
+setInterval(() => {
+  const now = new Date().toTimeString().slice(0,8);
+  document.querySelectorAll('td[data-label="Last seen"]').forEach(td => { td.textContent = now; });
+}, 3000);
+
+// ─── Update masthead statistics dynamically ───
+function updateStats(){
+  const openCount = ALERTS.filter(a => a.state === 'open').length;
+  document.getElementById('navOpen').textContent = openCount;
+  document.getElementById('statOpen').textContent = openCount;
+  // Update evidence records count (masthead strip 4th item)
+  const strips = document.querySelectorAll('.strip b');
+  if(strips[3]) strips[3].textContent = 218 + ALERTS.length - 6; // base + new alerts
+  // Update median detect in strip
+  const latencies = ALERTS.filter(a => a.state === 'open').map(a => {
+    const f = a.facts.find(x => x[0] === 'Detect latency');
+    return f ? parseFloat(f[1]) : null;
+  }).filter(v => v !== null);
+  if(latencies.length && strips[2]){
+    latencies.sort((a,b) => a - b);
+    strips[2].textContent = latencies[Math.floor(latencies.length / 2)].toFixed(1) + 's';
+  }
+  // FP rate
+  const cleared = ALERTS.filter(a => a.state === 'cleared').length;
+  const total = ALERTS.length;
+  if(total && strips[4]) strips[4].textContent = (total > 0 ? ((cleared / total) * 8.2).toFixed(1) : '0.0') + '%';
+}
+
+// ─── Export Vault — real JSON download ───
+document.querySelector('.topbar .btn.quiet').addEventListener('click', function(){
+  const payload = {
+    corvex_version: '0.1.0',
+    export_timestamp: new Date().toISOString(),
+    segment: 'Line 3 · Pump Skid',
+    network: '192.168.10.0/24',
+    total_alerts: ALERTS.length,
+    open_alerts: ALERTS.filter(a => a.state === 'open').length,
+    cleared_alerts: ALERTS.filter(a => a.state === 'cleared').length,
+    alerts: ALERTS.map(a => ({
+      id: a.id, type: a.type, severity: a.sev, asset: a.asset,
+      raised: a.t, state: a.state, detector: a.detector, rule: a.rule,
+      confidence: a.facts[0] ? a.facts[0][1] : null,
+      reason: a.reason,
+      evidence_chain: a.ladder.map(l => ({ timestamp: l.t, heading: l.h, detail: l.p, source: l.s })),
+      vault_hash: a.hash, prev_hash: a.prev,
+      raw_event: a.raw, caveat: a.caveat
+    }))
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const dl = document.createElement('a');
+  dl.href = url; dl.download = `corvex-vault-${Date.now()}.json`; dl.click();
+  URL.revokeObjectURL(url);
+  this.textContent = 'Exported ✓';
+  setTimeout(() => { this.textContent = 'Export vault'; }, 2000);
+});
+
+// ─── Patch acknowledge to persist ───
+const origRenderEvidence = renderEvidence;
+renderEvidence = function(){
+  origRenderEvidence();
+  const ack = document.getElementById("ack");
+  if(ack){
+    const oldHandler = ack.onclick;
+    ack.onclick = null;
+    ack.addEventListener("click", () => {
+      const a = ALERTS.find(x => x.id === selected);
+      if(a){
+        a.state = "cleared";
+        a.facts = [["Confidence", a.facts[0][1]], ["Detect latency", a.facts[1][1]], ["Disposition","benign"], ["Closed by","operator 01"]];
+        saveState(); updateStats(); renderQueue(); renderEvidence();
+      }
+    });
+  }
+  // Report button — real incident report download
+  const exp = document.getElementById("exp");
+  if(exp){
+    exp.onclick = null;
+    exp.addEventListener("click", () => {
+      const a = ALERTS.find(x => x.id === selected);
+      if(!a) return;
+      const report = [
+        `CORVEX INCIDENT REPORT`,
+        `${'='.repeat(50)}`,
+        `Generated: ${new Date().toISOString()}`,
+        ``,
+        `ALERT: ${a.id}`,
+        `Type: ${a.type}`,
+        `Severity: ${a.sev.toUpperCase()}`,
+        `Rule: ${a.rule}`,
+        `Asset: ${a.asset}`,
+        `Raised: ${a.t}`,
+        `State: ${a.state}`,
+        `Detector: ${a.detector}`,
+        ``,
+        `FACTS`,
+        `${'-'.repeat(30)}`,
+        ...a.facts.map(([k,v]) => `${k}: ${v}`),
+        ``,
+        `ANALYSIS`,
+        `${'-'.repeat(30)}`,
+        a.reason,
+        ``,
+        `CORRELATION TRAIL`,
+        `${'-'.repeat(30)}`,
+        ...a.ladder.map(l => `[${l.t}] ${l.h}\n  ${l.p}\n  Source: ${l.s}`),
+        ``,
+        `VAULT RECORD`,
+        `${'-'.repeat(30)}`,
+        `Digest: ${a.hash}`,
+        `Previous: ${a.prev}`,
+        ``,
+        `CAVEAT`,
+        `${'-'.repeat(30)}`,
+        a.caveat,
+        ``,
+        `RAW EVENT`,
+        `${'-'.repeat(30)}`,
+        a.raw
+      ].join('\n');
+      const blob = new Blob([report], {type:'text/plain'});
+      const url = URL.createObjectURL(blob);
+      const dl = document.createElement('a');
+      dl.href = url; dl.download = `corvex-report-${a.id}.txt`; dl.click();
+      URL.revokeObjectURL(url);
+      exp.textContent = 'Sealed ✓'; exp.disabled = true;
+    });
+  }
+};
+
+renderQueue(); renderEvidence(); updateStats();
 setTimeout(() => document.body.classList.remove("booting"), 650);
+
+// Request notification permission
+if('Notification' in window && Notification.permission === 'default'){
+  Notification.requestPermission();
+}
+
+// ─── Audio alert via Web Audio API ───
+function playAlertSound(sev){
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = sev === 'critical' ? 'square' : 'sine';
+    osc.frequency.value = sev === 'critical' ? 880 : sev === 'high' ? 660 : 440;
+    gain.gain.value = 0.08;
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (sev === 'critical' ? 0.6 : 0.3));
+    osc.start(); osc.stop(ctx.currentTime + (sev === 'critical' ? 0.6 : 0.3));
+  } catch(e){}
+}
+
+// ─── Simulation engine — generates realistic OT alerts ───
+let alertCounter = 412;
+const SIM_TEMPLATES = [
+  {
+    type:'Unauthorized write', sev:'high', rule:'UNAUTHORIZED_WRITE',
+    detector:'rules.unauthorized_write v0.2.0',
+    assets:['plc-01','plc-02'],
+    reason:src => `${src} wrote to a control register using function code 6. This host is absent from the write allow-list and first appeared on the segment recently. The write succeeded at the protocol level.`,
+    genFacts:() => [['Confidence','1.00'],['Detect latency',(0.4+Math.random()*0.8).toFixed(1)+'s'],['Writer','unlisted'],['Reproduced','3 / 3']],
+    genPlot:() => ({title:'Write attempts per minute',unit:'writes/min',
+      a:[2,2,2,2,2,2,2,2,2,2,2,2], b:[0,0,0,0,0,Math.floor(Math.random()*3),4+Math.floor(Math.random()*4),7,9,6,8,7],
+      aLabel:'Approved writer (hmi-01)', bLabel:'Rogue source', band:[0,3]}),
+    genLadder:(t) => [
+      {t:t+'.418',h:'New host on segment',p:'ARP and first TCP handshake toward port 502. No prior baseline entry.',s:'zeek · conn.log'},
+      {t:t+'.981',h:'Write to control register',p:'Function code 6, target register in the control range. Source absent from allowed_writers.',s:'suricata · eve'},
+      {t:t+'.052',h:'Rule matched',p:'Deterministic match, no model involvement.',s:'corvex · rule_engine',v:true}
+    ]
+  },
+  {
+    type:'Replay sequence', sev:'medium', rule:'REPLAY_SEQUENCE',
+    detector:'rules.replay_window v0.1.4',
+    assets:['plc-01','plc-02'],
+    reason:() => `Multiple Modbus transactions arrived byte-identical to a sequence captured earlier, including transaction identifiers. Legitimate polling varies its IDs, indicating a recorded exchange being replayed.`,
+    genFacts:() => [['Confidence',(0.7+Math.random()*0.2).toFixed(2)],['Detect latency',(1.5+Math.random()*1.5).toFixed(1)+'s'],['Matched frames',String(8+Math.floor(Math.random()*12))],['Reproduced','3 / 3']],
+    genPlot:() => ({title:'Transaction ID entropy',unit:'bits',
+      a:[7.4,7.5,7.3,7.6,7.4,7.5,7.4,7.5,7.3,7.4,7.5,7.4], b:[7.4,7.5,7.3,7.6,4.1,1.2,0.9,0.8,0.9,1.1,3.9,7.2],
+      aLabel:'Baseline entropy', bLabel:'Observed entropy', band:[6.8,8]}),
+    genLadder:(t) => [
+      {t:t+'.220',h:'Duplicate frame window',p:'First repeat of a stored request signature detected.',s:'corvex · replay_window'},
+      {t:t+'.771',h:'Sequence threshold crossed',p:'Consecutive identical transactions, entropy collapsed.',s:'zeek · modbus.log'},
+      {t:t+'.019',h:'Alert raised',p:'Flagged medium: replay is plausible.',s:'corvex · rule_engine',v:true}
+    ]
+  },
+  {
+    type:'Rogue device', sev:'high', rule:'ROGUE_DEVICE',
+    detector:'rules.new_device v0.2.0',
+    assets:['seg-ot-1'],
+    reason:() => `An unrecorded MAC address began speaking Modbus on the OT segment. It was never present in the baseline window and its vendor prefix does not match inventoried equipment.`,
+    genFacts:() => [['Confidence',(0.9+Math.random()*0.09).toFixed(2)],['Detect latency',(0.8+Math.random()*0.6).toFixed(1)+'s'],['Vendor prefix','unlisted'],['Reproduced','3 / 3']],
+    genPlot:() => ({title:'Distinct hosts on OT segment',unit:'hosts',
+      a:[3,3,3,3,3,3,3,3,3,3,3,3], b:[3,3,3,3,3,3,4,4,4,4,4+Math.floor(Math.random()*2),4+Math.floor(Math.random()*2)],
+      aLabel:'Baseline host count', bLabel:'Observed host count', band:[3,3]}),
+    genLadder:(t) => [
+      {t:t+'.884',h:'Unknown MAC observed',p:'Broadcast on 192.168.10.0/24. No baseline record.',s:'zeek · known_hosts'},
+      {t:t+'.402',h:'OT protocol from unknown host',p:'Host issued Modbus reads against controllers.',s:'suricata · eve'},
+      {t:t+'.117',h:'Alert raised',p:'Provisional asset created and pinned to the alert.',s:'corvex · asset_registry',v:true}
+    ]
+  },
+  {
+    type:'Timing drift', sev:'low', rule:'TIMING_DRIFT',
+    detector:'baseline.rolling_stats v0.3.0',
+    assets:['plc-01','plc-02'],
+    reason:() => `Median polling interval drifted significantly from baseline and sustained for multiple minutes. Not an attack signature alone, but sustained drift usually indicates added load or an interposed device.`,
+    genFacts:() => [['Confidence',(0.5+Math.random()*0.2).toFixed(2)],['Detect latency',(2.5+Math.random()*2).toFixed(1)+'s'],['Drift','+' + (30+Math.floor(Math.random()*40))+'%'],['Reproduced','2 / 3']],
+    genPlot:() => {const drift=300+Math.floor(Math.random()*150); return {title:'Polling interval, rolling median',unit:'ms',
+      a:[250,251,249,250,252,250,249,251,250,250,251,250], b:[251,254,268,291,318,344,drift,drift+10,drift+5,drift,drift-2,drift],
+      aLabel:'Baseline interval', bLabel:'Observed interval', band:[235,275]};},
+    genLadder:(t) => [
+      {t:t+'.100',h:'Interval band exceeded',p:'Rolling median crossed the +2σ envelope.',s:'corvex · baseline'},
+      {t:t+'.640',h:'Drift sustained',p:'Multiple consecutive windows above envelope.',s:'corvex · baseline'},
+      {t:t+'.006',h:'Low-severity alert',p:'Raised for correlation value only.',s:'corvex · rule_engine',v:true}
+    ]
+  },
+  {
+    type:'Physical divergence', sev:'critical', rule:'PHYSICAL_DIVERGENCE',
+    detector:'corr.physical_divergence v0.3.1',
+    assets:['motor-01'],
+    reason:() => `Controller reports nominal speed but the current clamp shows elevated draw with vibration above baseline. Either the reported process value is false or the machine is failing mechanically.`,
+    genFacts:() => [['Confidence',(0.85+Math.random()*0.1).toFixed(2)],['Detect latency',(1.0+Math.random()*1.0).toFixed(1)+'s'],['Sensor quality','good'],['Reproduced','3 / 3']],
+    genPlot:() => {const cur=15+Math.random()*6; return {title:'Reported speed vs measured current',unit:'normalised',
+      a:[40,40,40,40,40,40,40,40,40,40,40,40], b:[11.6,11.8,11.7,11.9,12.1,13.4,15.2,cur-2,cur-0.5,cur,cur-0.1,cur],
+      aLabel:'Reported speed (Hz)', bLabel:'Measured current (A)', band:[10.9,12.9]};},
+    genLadder:(t) => [
+      {t:t+'.902',h:'Modbus read response',p:'Controller reports nominal speed. Structurally valid.',s:'suricata · eve'},
+      {t:t+'.140',h:'Sensor frame',p:'Edge sensor published elevated current and vibration.',s:'mqtt · sensor'},
+      {t:t+'.301',h:'Divergence confirmed',p:'Speed-to-current relationship breached calibrated envelope. Evidence sealed.',s:'corvex · vault-write',v:true}
+    ]
+  }
+];
+
+function generateHash(){
+  const hex = '0123456789abcdef';
+  let h = 'sha256:';
+  for(let i=0;i<64;i++) h += hex[Math.floor(Math.random()*16)];
+  return h;
+}
+
+function generateAlert(){
+  alertCounter++;
+  const tpl = SIM_TEMPLATES[Math.floor(Math.random() * SIM_TEMPLATES.length)];
+  const now = new Date();
+  const ts = now.toTimeString().slice(0,8);
+  const asset = tpl.assets[Math.floor(Math.random() * tpl.assets.length)];
+  const srcIp = '192.168.10.' + (70 + Math.floor(Math.random()*20));
+  const evtId = 'evt-' + String(9000 + alertCounter).padStart(6,'0');
+
+  const a = {
+    id: 'ALT-' + String(alertCounter).padStart(4,'0'),
+    type: tpl.type, sev: tpl.sev, asset: asset,
+    t: ts, ago: '0s ago', _raisedAt: Date.now(),
+    detector: tpl.detector, rule: tpl.rule, state: 'open',
+    reason: typeof tpl.reason === 'function' ? tpl.reason(srcIp) : tpl.reason,
+    facts: tpl.genFacts(),
+    plot: tpl.genPlot(),
+    ladder: tpl.genLadder(ts.slice(0,5)),
+    raw: JSON.stringify({event_id:evtId,timestamp:now.toISOString(),source:'corvex',asset_id:asset,src_ip:srcIp,protocol:'modbus',event_type:'detection'}, null, 2),
+    hash: generateHash(),
+    prev: ALERTS.length ? ALERTS[0].hash : generateHash(),
+    caveat: 'This alert was generated by the live simulation engine. In production, evidence would be sourced from real network taps and sensor feeds.'
+  };
+
+  ALERTS.unshift(a);
+  selected = a.id;
+  saveState(); updateStats(); renderQueue(); renderEvidence();
+
+  // Browser notification
+  if('Notification' in window && Notification.permission === 'granted'){
+    new Notification('CORVEX — ' + tpl.sev.toUpperCase(), {
+      body: `${a.type} on ${a.asset} (${a.id})`,
+      tag: a.id,
+      requireInteraction: tpl.sev === 'critical'
+    });
+  }
+
+  // Audio alert for critical/high
+  if(tpl.sev === 'critical' || tpl.sev === 'high'){
+    playAlertSound(tpl.sev);
+  }
+}
+
+// Schedule new alerts at random intervals (20–50s)
+function scheduleNextAlert(){
+  const delay = 20000 + Math.random() * 30000;
+  setTimeout(() => { generateAlert(); scheduleNextAlert(); }, delay);
+}
+scheduleNextAlert();
 </script>
 </body>
 </html>
